@@ -1,0 +1,66 @@
+#!/bin/bash
+# Disk usage scan
+#
+# bash <(curl -s rep0.us/diskcheck)
+
+function topusers {
+  mnt=$(grep home /etc/fstab);
+  homes=$(grep -c home /etc/fstab )
+
+   if [ "$homes" -gt "1" ]; then
+    awk '/home/ {print $2}' /etc/fstab | while read mnt; do
+      echo -e "\t\tUsage for $mnt"
+      echo -e "------------------------------------------------"
+    	echo -e "User\t\tUsage(kb)\tUsage(GB)\n------------------------------------------------"
+      repquota $mnt 2>%1 | awk '!/root/ && !/mysql/ && !/virtfs/ { if ($3>5242880)mb=$3/1048576; print $1"   \t"$3"  \t"mb" GB" }' | sort -k2 -n | tail -10
+      echo -e "------------------------------------------------\n"
+    done
+  else
+
+  if [ -z "$mnt" ]; then
+    mnt="/"; else mnt="/home";
+  fi;
+    echo -e "User\t\tUsage(kb)\tUsage(GB)\n------------------------------------------------"
+    repquota $mnt 2>%1 | awk '!/root/ && !/mysql/ && !/virtfs/ { if ($3>5242880)mb=$3/1048576; print $1"   \t"$3"  \t"mb" GB" }' | sort -k2 -n | tail -10
+    echo -e "------------------------------------------------"
+  fi
+
+}
+
+case "$1" in
+  usage)
+    topusers
+  ;;
+  acct)
+    if [ -z "$2" ]; then
+    echo "Please specify accounts username"
+    exit 1
+    fi
+    user=$2
+    domain=`egrep ^DNS= /var/cpanel/users/$user | cut -d= -f2`
+    owner=$(egrep ^OWNER= /var/cpanel/users/$user | cut -d= -f2);
+    email=$(egrep ^CONTACTEMAIL= /var/cpanel/users/$owner|cut -d= -f2);
+    maindomain=$(egrep ^DNS= /var/cpanel/users/$owner | cut -d= -f2);
+
+    echo -e "\n$domain ($user)\n---------------------------------\nOWNER:\t$owner <$email>\nDOMAIN:\t$maindomain\nSYNCO:\thttps://synco.site5.com/smart_search/multi_query?q=$maindomain&commit=Go\n---------------------------------\n"
+
+    echo -e "Total account usage: `du -hs /home/$user/ | awk '{print $1}'`\n"
+    echo -e "Find large files:\n------------------------------"
+    find /home/$user/ -size +750M -printf "%s\0%p\n" | awk -F'\0' '{ printf("%5.1fGB %s\n", $1 / 1024000000, $2) }' | sort -nr
+    echo -e "\nLargest directories under the account:\n----------------------------------------------"
+    du -k /home/$user | awk '{ if ($1 > 750000) printf("%5.1fGB %s\n", $1 / 1024000, substr($0, index($0, $2))) }' | sort -nr
+
+    echo -e "\nRUP directory check:\n------------------------------"
+    find /home/$user/public_html/ -type d | while read i; do filenum=$(find "$i" -maxdepth 1 -type f | wc -l); if [ "$filenum" -gt "2500" ]; then dusage=$(du -hs "$i" | awk {'print $1'}); echo "$filenum files - $dusage - $i"; fi; done
+  ;;
+
+  help)
+    echo -e "\nPlease specify an action you would like to use:"
+    echo -e "\tusage - Print list of top 10 accounts with highest disk usage"
+    echo -e "\tacct [USER] - proceed with a disk usage report for specific user"
+    echo -e "\thelp - Displays this message\n"
+  ;;
+  *)
+    topusers
+  ;;
+esac

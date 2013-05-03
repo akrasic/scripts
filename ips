@@ -1,0 +1,123 @@
+#!/bin/bash
+#
+# Report used IPs
+# Last change: Fri, 04/26/2013
+#------------------------------------------------------
+verbose=$1
+
+if [ -z "$verbose"  ]; then
+   echo "USAGE:"
+   echo -e "\t-n\tDefault output"
+   echo -e "\t-v\tVerbose output"
+   echo -e "\t-h\tDisplays this message"
+   exit 1
+ fi
+
+function normalDisplay {
+      echo -e  "\_[$i] $used $sslvoid [$dnsreport] | Owner: $owner | [SSL $sslreport] ";
+}
+
+#
+# Get server information
+#-------------------------------------------
+echo -e "$HOSTNAME\n---------------------------"
+echo "Total additional ranges `awk '{split($0,a,":");print a[1];}' /etc/ips  | awk '{split($1,a,".");print a[1]"."a[2]"."a[3]}' | sort -u | wc -l`"
+echo "Ranges and number of IPs:"
+awk '{split($0,a,":");print a[1];}' /etc/ips  | awk '{split($1,a,".");print a[1]"."a[2]"."a[3]}' | uniq -c | awk {'print $2" "$1'} | while read i; do
+
+  fnum=$(echo $i| awk {'print $2'})
+  fip=$(echo $i | awk {'print $1'})
+  first=$(grep $fip /etc/ips | head -1 | cut -d: -f1)
+  last=$(grep $fip /etc/ips | tail -1 | cut -d: -f1|awk {'split($1,a,"."); print a[4];'})
+
+  echo -e "\t$first-$last\t$fnum IPs";
+
+  # Display the free IPs for this range
+  grep $fip /etc/ips | cut -d: -f1 | while read ss;do sslused=$(grep $ss /etc/domainips | awk {'print $2'}); if [ -z "$sslused" ]; then echo -e "\t\t$ss"; fi; done
+done
+
+#
+# Check on dedicated IP addresses and assigned accounts
+# =>  If the main domain is inactive, check for additional domains if they aren't active on the account
+#------------------------------------------------------------------------------------------------------------
+echo -e "\nList used/free IPs per range\n========================================================"
+awk '{split($0,a,":");print a[1];}' /etc/ips | while read i; do
+  used=$(grep $i /etc/domainips | awk {'print $2'});
+  owner=$( egrep ^OWNER= /var/cpanel/users/`/scripts/whoowns $used` | cut -d= -f2);
+  dnsreport=
+  sslvalid=
+  sslreport=
+  sslvoid=
+  ssldomain=
+  now=
+
+
+  if [ -z "$used" ]; then
+    echo -e "\_[$i]  \tUNUSED";
+  else
+    #
+    # Get SSL certificate information from the dedicated IP address :443
+    sslout=$( echo " GET / HTTP/1.0" | openssl x509 -in  <(openssl s_client -connect $i:443 2>&1)  -noout -subject 2>&1  );
+    if [ "$?" -gt 0 ]; then
+      sslreport=" NOT INSTALLED, :443 quiet"
+    else
+    ssldomain=$( echo " GET / HTTP/1.0" | openssl x509 -in  <(openssl s_client -connect $i:443 2>/dev/null)  -noout -subject | awk {'split($0,a,"/CN="); print a[2];'} | cut -d/ -f1);
+    cert_expiry_date=$( echo " GET / HTTP/1.0" | openssl x509 -in  <(openssl s_client -connect $i:443 2>/dev/null)  -noout -enddate | awk -F= ' /notAfter/ { printf("%s\n",$NF); } ');
+    seconds_until_expiry=$(echo "$(date --date="$cert_expiry_date" +%s) - $(date +%s)" |bc);
+    days_until_expiry=$(echo "$seconds_until_expiry/(60*60*24)" |bc);
+
+    if [ "$days_until_expiry" -gt 0 ]; then
+      #sslreport="$ssldomain VALID: "$days_until_expiry" days"
+      sslreport="VALID for $days_until_expiry days"
+    else
+      #sslreport="$ssldomain EXPIRED  "$days_until_expiry" days ago"
+      sslreport="EXPIRED "$days_until_expiry" days ago"
+    fi
+  fi
+
+  # Bugfix - notify if the SSL domain doesn't match the main domain
+  if [ -n "$ssldomain" ]; then
+    if [ "$ssldomain" != "$used" ]; then
+      if [ "$ssldomain" != "www.$used" ]; then
+        if [ "$ssldomain" != "\*.$used" ]; then
+          sslvoid="[SSL  $ssldomain]"
+        fi
+      fi
+    fi
+  fi
+
+    dnscheck=$(dig +short $used A)
+    if [ "$dnscheck" == "$i" ]; then
+      dnsreport="ACTIVE"
+			#echo -e  "$i - [$dnsreport] $used |Owner: $owner | [SSL $sslreport] ";
+    else
+      if [ -z "$dnscheck" ]; then
+        dnsreport="NOT REGISTERED"
+      else
+        hname=$(dig +short -x $dnscheck PTR)
+        if  [ "$hname" == '' ]; then
+          hname="NO PTR"
+        fi
+        dnsreport="INACTIVE"
+        dnsmsg=" $dnscheck $hname"
+      fi
+      #echo -e  "$i - [$dnsreport] $used |Owner: $owner ";
+    fi
+    if [ "$verbose" == "-v" ]; then
+      #echo -e "\_[$i]\tUSED\n|\tDomain: $used"
+      echo -e "\_$i $used"
+      echo -e "|\tDomain status: $dnsreport"
+      if [ "$dnscheck" == "INACTIVE" ]; then echo -e "|\tCurent host: $dnsmsg"; fi
+      if [ -n "$ssldomain" ]; then echo -e "|\tSSL Domain: $ssldomain"; fi
+      if [ -n "$sslvoid" ]; then echo -e "|\tSSL Mismatch: $sslvoid"; fi
+      echo -e "|\tSSL status: $sslreport"
+      echo -e "|\tOwner: $owner"
+    elif [ "$verbose" == "-n" ]; then
+      #echo -e  "\_[$i] $used $sslvoid [$dnsreport]  |Owner: $owner | [SSL $sslreport] ";
+      normalDisplay
+    else
+      #echo -e  "\_[$i] $used $sslvoid [$dnsreport]  |Owner: $owner | [SSL $sslreport] ";
+      normalDisplay
+    fi
+  fi
+ done
