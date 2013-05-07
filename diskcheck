@@ -42,7 +42,7 @@ case "$1" in
     email=$(egrep ^CONTACTEMAIL= /var/cpanel/users/$owner|cut -d= -f2);
     maindomain=$(egrep ^DNS= /var/cpanel/users/$owner | cut -d= -f2);
 
-    echo -e "\n$domain ($user)\n---------------------------------\nOWNER:\t$owner <$email>\nDOMAIN:\t$maindomain\nSYNCO:\thttps://synco.site5.com/smart_search/multi_query?q=$maindomain&commit=Go\n---------------------------------\n"
+    echo -e "\n$domain ($user)\n---------------------------------\nOWNER:\t$owner <$email>\nDOMAIN:\t$maindomain\nSYNCO:\t\n---------------------------------\n"
 
     echo -e "Total account usage: `du -hs /home/$user/ | awk '{print $1}'`\n"
     echo -e "Find large files:\n------------------------------"
